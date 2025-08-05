@@ -424,7 +424,7 @@ let reactRCTFabric = RNTarget(
 let reactFabricComponents = RNTarget(
   name: .reactFabricComponents,
   path: "ReactCommon/react/renderer",
-  searchPaths: [ReactFBReactNativeSpecPath],
+  // searchPaths: [ReactFBReactNativeSpecPath],
   excludedPaths: [
     "components/modal/platform/android",
     "components/modal/platform/cxx",

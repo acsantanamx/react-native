@@ -130,7 +130,7 @@ Pod::Spec.new do |s|
     ss.subspec "switch" do |sss|
       sss.source_files         = podspec_sources(
                                   ["react/renderer/components/switch/iosswitch/**/*.{m,mm,cpp,h}"],
-                                  ["react/renderer/components/switch/iosswitch/**/*.{m,mm,cpp,h}"])
+                                  ["react/renderer/components/switch/iosswitch/**/*.h"])
       sss.header_dir           = "react/renderer/components/switch/"
     end
 
