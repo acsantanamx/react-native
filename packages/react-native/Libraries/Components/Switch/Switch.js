@@ -264,7 +264,7 @@ const Switch: component(
       disabled,
       onTintColor: trackColorForTrue,
       style: StyleSheet.compose(
-        {alignSelf: 'baseline' as const},
+        {alignSelf: 'flex-start' as const},
         StyleSheet.compose(
           style,
           ios_backgroundColor == null
