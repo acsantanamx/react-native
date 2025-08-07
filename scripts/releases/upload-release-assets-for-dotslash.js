@@ -21,6 +21,9 @@ const {Octokit} = require('@octokit/rest');
 const {
   FIRST_PARTY_DOTSLASH_FILES,
 } = require('./write-dotslash-release-asset-urls');
+const os = require('os');
+const {promises: fs} = require('fs');
+const {spawnSync} = require('child_process');
 
 const config = {
   allowPositionals: true,
@@ -93,112 +96,133 @@ async function uploadReleaseAssetsForDotSlash(
   const existingAssetsByName = new Map(
     existingAssets.data.map(asset => [asset.name, asset]),
   );
-  for (const filename of FIRST_PARTY_DOTSLASH_FILES) {
-    const fullPath = path.join(REPO_ROOT, filename);
-    console.log(`Uploading assets for ${filename}...`);
-    const uploadPromises = [];
-    await processDotSlashFileInPlace(
-      fullPath,
-      (
-        providers,
-        // NOTE: We mostly ignore suggestedFilename in favour of reading the actual asset URLs
-        suggestedFilename,
-      ) => {
-        let upstreamUrl, targetReleaseAssetInfo;
-        for (const provider of providers) {
-          if (provider.type != null && provider.type !== 'http') {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dotslash-uploads-'));
+  try {
+    for (const filename of FIRST_PARTY_DOTSLASH_FILES) {
+      const fullPath = path.join(REPO_ROOT, filename);
+      console.log(`Uploading assets for ${filename}...`);
+      const uploadPromises = [];
+      await processDotSlashFileInPlace(
+        fullPath,
+        (
+          providers,
+          // NOTE: We mostly ignore suggestedFilename in favour of reading the actual asset URLs
+          suggestedFilename,
+        ) => {
+          let upstreamUrl, targetReleaseAssetInfo;
+          for (const provider of providers) {
+            if (provider.type != null && provider.type !== 'http') {
+              console.log(
+                'Skipping non-HTTP provider: ' + JSON.stringify(provider),
+              );
+              continue;
+            }
+            const url = provider.url;
+            if (url.startsWith(releaseAssetPrefix)) {
+              const name = decodeURIComponent(
+                url.slice(releaseAssetPrefix.length),
+              );
+              targetReleaseAssetInfo = {name, url};
+            } else {
+              upstreamUrl = url;
+            }
+            if (upstreamUrl != null && targetReleaseAssetInfo != null) {
+              break;
+            }
+          }
+          if (targetReleaseAssetInfo == null) {
+            // This DotSlash providers array does not reference any relevant release asset URLs, so we can ignore it.
             console.log(
-              'Skipping non-HTTP provider: ' + JSON.stringify(provider),
+              `[${suggestedFilename} (suggested)] No provider URLs matched release asset prefix: ${releaseAssetPrefix}`,
             );
-            continue;
+            return;
           }
-          const url = provider.url;
-          if (url.startsWith(releaseAssetPrefix)) {
-            const name = decodeURIComponent(
-              url.slice(releaseAssetPrefix.length),
+          if (upstreamUrl == null) {
+            throw new Error(
+              `No upstream URL found for release asset ${targetReleaseAssetInfo.name}`,
             );
-            targetReleaseAssetInfo = {name, url};
-          } else {
-            upstreamUrl = url;
           }
-          if (upstreamUrl != null && targetReleaseAssetInfo != null) {
-            break;
-          }
-        }
-        if (targetReleaseAssetInfo == null) {
-          // This DotSlash providers array does not reference any relevant release asset URLs, so we can ignore it.
-          console.log(
-            `[${suggestedFilename} (suggested)] No provider URLs matched release asset prefix: ${releaseAssetPrefix}`,
-          );
-          return;
-        }
-        if (upstreamUrl == null) {
-          throw new Error(
-            `No upstream URL found for release asset ${targetReleaseAssetInfo.name}`,
-          );
-        }
-        uploadPromises.push(
-          (async () => {
-            if (existingAssetsByName.has(targetReleaseAssetInfo.name)) {
-              if (!force) {
-                console.log(
-                  `[${targetReleaseAssetInfo.name}] Skipping existing release asset...`,
-                );
-                return;
+          uploadPromises.push(
+            (async () => {
+              if (existingAssetsByName.has(targetReleaseAssetInfo.name)) {
+                if (!force) {
+                  console.log(
+                    `[${targetReleaseAssetInfo.name}] Skipping existing release asset...`,
+                  );
+                  return;
+                }
+                if (dryRun) {
+                  console.log(
+                    `[${targetReleaseAssetInfo.name}] Dry run: Not deleting existing release asset.`,
+                  );
+                } else {
+                  console.log(
+                    `[${targetReleaseAssetInfo.name}] Deleting existing release asset...`,
+                  );
+                  await octokit.repos.deleteReleaseAsset({
+                    owner: 'facebook',
+                    repo: 'react-native',
+                    asset_id: existingAssetsByName.get(
+                      targetReleaseAssetInfo.name,
+                    ).id,
+                  });
+                }
               }
+              console.log(
+                `[${targetReleaseAssetInfo.name}] Downloading from ${upstreamUrl}...`,
+              );
+              const tempFile = path.join(tempDir, targetReleaseAssetInfo.name);
+              const curlOutput = spawnSync(
+                // use long form of options for clarity, e.g. --silent instead of -s
+                'curl',
+                [
+                  '--silent',
+                  '--location',
+                  '--output',
+                  tempFile,
+                  upstreamUrl,
+                  // get the content-type header
+                  '--write-out',
+                  '%{header_json}',
+                ],
+                {encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']},
+              );
+              if (curlOutput.status !== 0) {
+                throw new Error(
+                  `Failed to download ${upstreamUrl}: ${curlOutput.stderr}`,
+                );
+              }
+              const data = await fs.readFile(tempFile);
+              const headers = JSON.parse(curlOutput.stdout);
               if (dryRun) {
                 console.log(
-                  `[${targetReleaseAssetInfo.name}] Dry run: Not deleting existing release asset.`,
+                  `[${targetReleaseAssetInfo.name}] Dry run: Not uploading to release.`,
                 );
+                return;
               } else {
                 console.log(
-                  `[${targetReleaseAssetInfo.name}] Deleting existing release asset...`,
+                  `[${targetReleaseAssetInfo.name}] Uploading to release...`,
                 );
-                await octokit.repos.deleteReleaseAsset({
+                await octokit.repos.uploadReleaseAsset({
                   owner: 'facebook',
                   repo: 'react-native',
-                  asset_id: existingAssetsByName.get(
-                    targetReleaseAssetInfo.name,
-                  ).id,
+                  release_id: releaseId,
+                  name: targetReleaseAssetInfo.name,
+                  data,
+                  headers: {
+                    'content-type':
+                      headers['content-type'] ?? 'application/octet-stream',
+                  },
                 });
               }
-            }
-            console.log(
-              `[${targetReleaseAssetInfo.name}] Downloading from ${upstreamUrl}...`,
-            );
-            const response = await fetch(upstreamUrl);
-            if (!response.ok) {
-              throw new Error(
-                `Failed to download ${upstreamUrl}: ${response.status} ${response.statusText}`,
-              );
-            }
-            const data = await response.arrayBuffer();
-            const contentType = response.headers.get('content-type');
-            if (dryRun) {
-              console.log(
-                `[${targetReleaseAssetInfo.name}] Dry run: Not uploading to release.`,
-              );
-              return;
-            } else {
-              console.log(
-                `[${targetReleaseAssetInfo.name}] Uploading to release...`,
-              );
-              await octokit.repos.uploadReleaseAsset({
-                owner: 'facebook',
-                repo: 'react-native',
-                release_id: releaseId,
-                name: targetReleaseAssetInfo.name,
-                data,
-                headers: {
-                  'content-type': contentType,
-                },
-              });
-            }
-          })(),
-        );
-      },
-    );
-    await Promise.all(uploadPromises);
+            })(),
+          );
+        },
+      );
+      await Promise.all(uploadPromises);
+    }
+  } finally {
+    await fs.rm(tempDir, {recursive: true, force: true});
   }
 }
 
