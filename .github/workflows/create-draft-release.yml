@@ -37,7 +37,8 @@ jobs:
         with:
           script: |
             const {uploadReleaseAssetsForDotSlash} = require('./scripts/releases/upload-release-assets-for-dotslash.js');
-            const version = '${{ github.ref_name }}';
+            // const version = '${{ github.ref_name }}';
+            const version = 'v0.82.0-20250807-1752';
             await uploadReleaseAssetsForDotSlash({
               version,
               token: '${{secrets.REACT_NATIVE_BOT_GITHUB_TOKEN}}',
