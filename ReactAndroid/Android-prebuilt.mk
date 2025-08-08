@@ -14,6 +14,9 @@
 
 LOCAL_PATH := $(call my-dir)
 
+LOCAL_LDFLAGS += "-Wl,-z,max-page-size=16384"
+LOCAL_LDFLAGS += "-Wl,-z,common-page-size=16384"
+
 FIRST_PARTY_NDK_DIR := $(REACT_ANDROID_DIR)/src/main/jni/first-party
 THIRD_PARTY_NDK_DIR := $(REACT_ANDROID_BUILD_DIR)/third-party-ndk
 REACT_ANDROID_SRC_DIR := $(REACT_ANDROID_DIR)/src/main
