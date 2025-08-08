@@ -31,4 +31,7 @@ APP_CPPFLAGS := -std=c++1y
 # Make sure every shared lib includes a .note.gnu.build-id header
 APP_LDFLAGS := -Wl,--build-id
 
+APP_LDFLAGS += -Wl,-z,max-page-size=16384
+APP_LDFLAGS += -Wl,-z,common-page-size=16384
+
 NDK_TOOLCHAIN_VERSION := clang
